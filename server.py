@@ -4,24 +4,68 @@ from datetime import datetime
 app = Flask(__name__)
 
 data_store = []
+activity_log = []
 control_state = {"cutoff": False}
+
+last_state = None
+state_start_time = None
+
 
 @app.route('/api/data', methods=['POST'])
 def receive_data():
+    global last_state, state_start_time
+
     data = request.json
 
-    entry = {
-        "usage": data.get("usage"),
-        "occupied": data.get("occupied"),
-        "time": datetime.now().strftime("%H:%M:%S")
-    }
+    usage = float(data.get("usage", 0))
+    voltage = float(data.get("voltage", 230))
+    occupied = bool(data.get("occupied", False))
 
-    data_store.append(entry)
+    now = datetime.now()
 
-    if len(data_store) > 100:
-        data_store.pop(0)
+    data_store.append({
+        "usage": usage,
+        "voltage": voltage,
+        "occupied": occupied,
+        "timestamp": now.isoformat()
+    })
 
-    return jsonify({"status": "received"})
+    if last_state is None:
+        last_state = occupied
+        state_start_time = now
+
+    elif occupied != last_state:
+        duration = int((now - state_start_time).total_seconds())
+
+        activity_log.append({
+            "status": "Occupied" if last_state else "Empty",
+            "start": state_start_time.isoformat(),
+            "end": now.isoformat(),
+            "duration": duration
+        })
+
+        last_state = occupied
+        state_start_time = now
+
+    return jsonify({"status": "ok"})
+
+
+@app.route('/api/logs', methods=['GET'])
+def get_logs():
+    logs = activity_log.copy()
+
+    if state_start_time is not None:
+        now = datetime.now()
+        duration = int((now - state_start_time).total_seconds())
+
+        logs.append({
+            "status": "Occupied" if last_state else "Empty",
+            "start": state_start_time.isoformat(),
+            "end": None,
+            "duration": duration
+        })
+
+    return jsonify(logs)
 
 
 @app.route('/api/data', methods=['GET'])
